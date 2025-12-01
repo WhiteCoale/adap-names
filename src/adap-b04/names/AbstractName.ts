@@ -1,5 +1,6 @@
 import { IllegalArgumentException } from "../common/IllegalArgumentException";
 import { InvalidStateException } from "../common/InvalidStateException";
+import { MethodFailedException } from "../common/MethodFailedException";
 import { DEFAULT_DELIMITER, ESCAPE_CHARACTER } from "../common/Printable";
 import { Name } from "./Name";
 
@@ -7,45 +8,54 @@ export abstract class AbstractName implements Name {
 
     protected delimiter: string = DEFAULT_DELIMITER;
 
-    constructor(delimiter: string = DEFAULT_DELIMITER) {
+    protected constructor(delimiter: string = DEFAULT_DELIMITER) {
+        IllegalArgumentException.assert(this.isValidDelimiter(delimiter), "delimiter must be single character");
+
         this.delimiter = delimiter;
+
+        MethodFailedException.assert(this.getDelimiterCharacter() === delimiter, "delimiter not set correctly");
     }
 
-    public abstract clone(): Name;
+    public clone(): Name{
+
+        return this;
+    }
 
     public asString(delimiter: string = this.delimiter): string {
-        if (delimiter.length !== 1) {
-            throw new IllegalArgumentException("delimiter must be single character");
-        }
+        IllegalArgumentException.assert(this.isValidDelimiter(delimiter), "delimiter must be single character");
 
         const parts: string[] = [];
         const count = this.getNoComponents();
         for(let i = 0; i < count; i++) {
-            parts.push(this.getComponent(i));
+            parts.push(this.getUnmaskedComponent(this.getComponent(i)));
         }
-        return parts.map(s => AbstractName.unescaped(s)).join(delimiter);
+        return parts.join(delimiter);
     }
 
     public toString(): string {
-        // ???
+
         return this.asDataString();
     }
 
     public asDataString(): string {
-        const parts: string[] = [];
-        const count = this.getNoComponents();
-        for(let i = 0; i < count; i++) {
-            parts.push(this.getComponent(i));
+        let name: string = "";
+
+        const length: number = this.getNoComponents();
+
+        for (let i: number = 0; i < length - 1; i++) {
+            name += this.getComponent(i) + this.delimiter;
         }
-        return parts.map(
-                s => AbstractName.escaped(
-                    AbstractName.unescaped(s), DEFAULT_DELIMITER)
-            ).join(DEFAULT_DELIMITER);
+
+        if (length > 0) {
+            name += this.getComponent(length - 1);
+        }
+
+        return name;
     }
 
     public isEqual(other: Name): boolean {
-        return this.delimiter == other.getDelimiterCharacter()
-            && this.asDataString() == other.asDataString();
+
+        return this.getHashCode() === other.getHashCode();
     }
 
     public getHashCode(): number {
@@ -60,10 +70,12 @@ export abstract class AbstractName implements Name {
     }
 
     public isEmpty(): boolean {
-        return this.asDataString() == "";
+        return this.getNoComponents() === 0;
     }
 
     public getDelimiterCharacter(): string {
+        InvalidStateException.assert(this.delimiter.length === 1, "delimiter state invalid");
+
         return this.delimiter;
     }
 
@@ -77,13 +89,18 @@ export abstract class AbstractName implements Name {
     abstract remove(i: number): void;
 
     public concat(other: Name): void {
-        if (other.getDelimiterCharacter() !== this.delimiter) {
-            throw new IllegalArgumentException("Delimiters do not match");
-        }
+        IllegalArgumentException.assert(other.getDelimiterCharacter() === this.delimiter, "Delimiters do not match");
+        IllegalArgumentException.assert(this.isValidName(other.asDataString()), "other name is not valid");
+
+        const initialComponentCount = this.getNoComponents();
         const otherCount = other.getNoComponents();
+
         for(let i = 0; i < otherCount; i++) {
             this.append(other.getComponent(i));
         }
+
+        MethodFailedException.assert(this.getNoComponents() === initialComponentCount + otherCount, "concat failed to append all components");
+        InvalidStateException.assert(this.isValidName(this.asDataString()), "resulting name state is invalid");
     }
 
     // helper methods
@@ -142,5 +159,108 @@ export abstract class AbstractName implements Name {
         if (!AbstractName.isEscapedComponent(s, this.getDelimiterCharacter())) {
             throw new IllegalArgumentException(`string not escaped! -> ${s}`);
         }
+    }
+
+    // helper methods for validation and unmasking
+
+    protected getUnmaskedComponent(component: string): string {
+        IllegalArgumentException.assert(this.isValidComponent(component), "component is not valid");
+
+        const maskedDelimiter: string = ESCAPE_CHARACTER + this.getDelimiterCharacter();
+        const maskedEscapeCharacter: string = ESCAPE_CHARACTER + ESCAPE_CHARACTER;
+
+        return component
+            .replaceAll(maskedDelimiter, this.getDelimiterCharacter())
+            .replaceAll(maskedEscapeCharacter, ESCAPE_CHARACTER);
+    }
+
+    protected isValidIndex(i: number): boolean {
+        return i >= 0 && i < this.getNoComponents();
+    }
+
+    protected isValidDelimiter(delimiter: string): boolean {
+        return delimiter.length === 1;
+    }
+
+    protected isValidComponent(c: string): boolean {
+        // if delimiter is ESCAPE_CHARACTER, validation is not possible
+        if (this.delimiter === ESCAPE_CHARACTER) {
+            return true;
+        }
+
+        let escapedCounter: number = 0;
+
+        for (let i: number = 0; i < c.length; i++) {
+            const char: string = c[i];
+
+            switch (char) {
+                case this.delimiter: {
+                    if (escapedCounter === 1) {
+                        escapedCounter = 0;
+                    } else {
+                        return false;
+                    }
+                    break;
+                }
+
+                case ESCAPE_CHARACTER: {
+                    escapedCounter++;
+
+                    if (escapedCounter === 2) {
+                        escapedCounter = 0;
+                    }
+
+                    break;
+                }
+
+                default: {
+                    if (escapedCounter !== 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return escapedCounter === 0;
+    }
+
+    protected isValidName(n: string): boolean {
+        // if delimiter is ESCAPE_CHARACTER, validation is not possible
+        if (this.delimiter === ESCAPE_CHARACTER) {
+            return true;
+        }
+
+        let escapedCounter: number = 0;
+
+        for (let i: number = 0; i < n.length; i++) {
+            const char: string = n[i];
+
+            switch (char) {
+                case this.delimiter: {
+                    if (escapedCounter === 1) {
+                        escapedCounter = 0;
+                    }
+                    break;
+                }
+
+                case ESCAPE_CHARACTER: {
+                    escapedCounter++;
+
+                    if (escapedCounter === 2) {
+                        escapedCounter = 0;
+                    }
+
+                    break;
+                }
+
+                default: {
+                    if (escapedCounter !== 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return escapedCounter === 0;
     }
 }
