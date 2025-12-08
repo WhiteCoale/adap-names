@@ -5,6 +5,7 @@ import { InvalidStateException } from "../common/InvalidStateException";
 
 export class StringName extends AbstractName {
 
+    // protected vars
     protected name: string = "";
     protected noComponents: number = 0;
 
